@@ -16,10 +16,11 @@ find_package(catkin REQUIRED COMPONENTS
   visualization_msgs
   cv_bridge
   message_filters
+  pcl_conversions
 )
 
 find_package(Eigen3 REQUIRED)
-find_package(PCL 1.7 REQUIRED)
+find_package(PCL  REQUIRED)
 
 catkin_package(
  INCLUDE_DIRS include

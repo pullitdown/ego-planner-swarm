@@ -19,7 +19,7 @@ namespace ego_planner
     nh.param("fsm/planning_horizon", planning_horizen_, -1.0);
     nh.param("fsm/planning_horizen_time", planning_horizen_time_, -1.0);
     nh.param("fsm/emergency_time", emergency_time_, 1.0);
-    nh.param("fsm/realworld_experiment", flag_realworld_experiment_, false);
+    nh.param("fsm/realworld_experiment", flag_realworld_experiment_, true);
     nh.param("fsm/fail_safe", enable_fail_safe_, true);
 
     have_trigger_ = !flag_realworld_experiment_;

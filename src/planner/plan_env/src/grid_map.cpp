@@ -50,6 +50,9 @@ void GridMap::initMap(ros::NodeHandle &nh)
   node_.param("grid_map/frame_id", mp_.frame_id_, string("world"));
   node_.param("grid_map/local_map_margin", mp_.local_map_margin_, 1);
   node_.param("grid_map/ground_height", mp_.ground_height_, 1.0);
+  int subscribe_pose_type;
+  node_.param("grid_map/subscribe_pose_type", subscribe_pose_type, 1);
+  mp_.subscribe_pose_type = static_cast<pose_type>(subscribe_pose_type);
 
   node_.param("grid_map/odom_depth_timeout", mp_.odom_depth_timeout_, 1.0);
 
@@ -98,21 +101,23 @@ void GridMap::initMap(ros::NodeHandle &nh)
   md_.proj_points_.resize(640 * 480 / mp_.skip_pixel_ / mp_.skip_pixel_);
   md_.proj_points_cnt = 0;
 
-  md_.cam2body_ << 0.0, 0.0, 1.0, 0.0,
-      -1.0, 0.0, 0.0, 0.0,
-      0.0, -1.0, 0.0, 0.0,
-      0.0, 0.0, 0.0, 1.0;
-
+  md_.cam2body_ 
+  <<
+             0.99955752, -0.02918324, -0.00575307, -0.00487046,
+             0.02919905 , 0.99957001 , 0.00268382,  0.00750499,
+             0.00567227, -0.00285062,  0.99997985,  0.02189337,
+             0. ,         0.   ,       0.    ,      1.        ;
   /* init callback */
 
-  depth_sub_.reset(new message_filters::Subscriber<sensor_msgs::Image>(node_, "grid_map/depth", 50));
+  depth_sub_.reset(new message_filters::Subscriber<sensor_msgs::Image>(node_, "/elas/depth", 50));
   extrinsic_sub_ = node_.subscribe<nav_msgs::Odometry>(
       "/vins_estimator/extrinsic", 10, &GridMap::extrinsicCallback, this); //sub
+
 
   if (mp_.pose_type_ == POSE_STAMPED)
   {
     pose_sub_.reset(
-        new message_filters::Subscriber<geometry_msgs::PoseStamped>(node_, "grid_map/pose", 25));
+        new message_filters::Subscriber<geometry_msgs::PoseStamped>(node_, "/svo/backend_pose_imu_viz", 50));
 
     sync_image_pose_.reset(new message_filters::Synchronizer<SyncPolicyImagePose>(
         SyncPolicyImagePose(100), *depth_sub_, *pose_sub_));
@@ -229,6 +234,7 @@ void GridMap::projectDepthImage()
 
   if (!mp_.use_depth_filter_)
   {
+    const double inv_factor = 1.0 / mp_.k_depth_scaling_factor_;
     for (int v = 0; v < rows; v+=skip_pix)
     {
       row_ptr = md_.depth_image_.ptr<uint16_t>(v);
@@ -237,7 +243,7 @@ void GridMap::projectDepthImage()
       {
 
         Eigen::Vector3d proj_pt;
-        depth = (*row_ptr++) / mp_.k_depth_scaling_factor_;
+        depth = (*row_ptr++) * inv_factor;
         proj_pt(0) = (u - mp_.cx_) * depth / mp_.fx_;
         proj_pt(1) = (v - mp_.cy_) * depth / mp_.fy_;
         proj_pt(2) = depth;
@@ -377,7 +383,7 @@ void GridMap::raycastProcess()
       {
         pt_w = (pt_w - md_.camera_pos_) / length * mp_.max_ray_length_ + md_.camera_pos_;
       }
-      vox_idx = setCacheOccupancy(pt_w, 0);
+      vox_idx = setCacheOccupancy(pt_w, 0);//add the end of ray into voxel cache which point in it would be raycasting
     }
     else
     {
@@ -677,7 +683,7 @@ void GridMap::updateOccupancyCallback(const ros::TimerEvent & /*event*/)
   md_.last_occ_update_time_ = ros::Time::now();
 
   /* update occupancy */
-  // ros::Time t1, t2, t3, t4;
+  ros::Time t1, t2, t3, t4;
   // t1 = ros::Time::now();
 
   projectDepthImage();
@@ -710,6 +716,7 @@ void GridMap::depthPoseCallback(const sensor_msgs::ImageConstPtr &img,
   /* get depth image */
   cv_bridge::CvImagePtr cv_ptr;
   cv_ptr = cv_bridge::toCvCopy(img, img->encoding);
+  // std::cout << "depth: " << cv_ptr->image<< std::endl;
 
   if (img->encoding == sensor_msgs::image_encodings::TYPE_32FC1)
   {
@@ -717,20 +724,48 @@ void GridMap::depthPoseCallback(const sensor_msgs::ImageConstPtr &img,
   }
   cv_ptr->image.copyTo(md_.depth_image_);
 
-  // std::cout << "depth: " << md_.depth_image_.cols << ", " << md_.depth_image_.rows << std::endl;
-
+  
   /* get pose */
-  md_.camera_pos_(0) = pose->pose.position.x;
-  md_.camera_pos_(1) = pose->pose.position.y;
-  md_.camera_pos_(2) = pose->pose.position.z;
-  md_.camera_r_m_ = Eigen::Quaterniond(pose->pose.orientation.w, pose->pose.orientation.x,
-                                       pose->pose.orientation.y, pose->pose.orientation.z)
-                        .toRotationMatrix();
+  if (mp_.subscribe_pose_type == pose_type::imu_pose)
+  {
+    md_.camera_pos_(0) = pose->pose.position.x;
+    md_.camera_pos_(1) = pose->pose.position.y;
+    md_.camera_pos_(2) = pose->pose.position.z;
+    md_.camera_r_m_ = Eigen::Quaterniond(pose->pose.orientation.w, pose->pose.orientation.x,
+                                         pose->pose.orientation.y, pose->pose.orientation.z)
+                          .toRotationMatrix();
+  }
+  else if (mp_.subscribe_pose_type == pose_type::camera_pose)
+  {
+    Eigen::Quaterniond body_q = Eigen::Quaterniond(pose->pose.orientation.w,
+                                                   pose->pose.orientation.x,
+                                                   pose->pose.orientation.y,
+                                                   pose->pose.orientation.z);
+    Eigen::Matrix3d body_r_m = body_q.toRotationMatrix();
+    Eigen::Matrix4d body2world;
+    body2world.block<3, 3>(0, 0) = body_r_m;
+    body2world(0, 3) = pose->pose.position.x;
+    body2world(1, 3) = pose->pose.position.y;
+    body2world(2, 3) = pose->pose.position.z;
+    body2world(3, 3) = 1.0;
+
+    Eigen::Matrix4d cam_T = body2world * md_.cam2body_;
+    md_.camera_pos_(0) = cam_T(0, 3);
+    md_.camera_pos_(1) = cam_T(1, 3);
+    md_.camera_pos_(2) = cam_T(2, 3);
+    md_.camera_r_m_ = cam_T.block<3, 3>(0, 0);
+  }
+  else
+  {
+    ROS_WARN("the subscribe pose type niether camera pose nor imu pose ");
+  }
+
   if (isInMap(md_.camera_pos_))
   {
     md_.has_odom_ = true;
     md_.update_num_ += 1;
     md_.occ_need_update_ = true;
+    // ROS_INFO("update occ");
   }
   else
   {

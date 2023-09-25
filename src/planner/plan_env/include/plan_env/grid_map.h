@@ -28,6 +28,11 @@
 
 using namespace std;
 
+
+enum pose_type{
+    imu_pose,
+    camera_pose
+  };
 // voxel hashing
 template <typename T>
 struct matrix_hash : std::unary_function<T, size_t> {
@@ -83,6 +88,8 @@ struct MappingParameters {
 
   /* active mapping */
   double unknown_flag_;
+
+  pose_type subscribe_pose_type;
 };
 
 // intermediate mapping data for fusion

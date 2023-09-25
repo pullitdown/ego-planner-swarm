@@ -22,7 +22,7 @@
 #include <Eigen/Eigen>
 #include <Eigen/SVD>
 #include <math.h>
-
+#include <deque>
 #include <random>
 #include <sys/time.h>
 #include <time.h>
