@@ -1,7 +1,7 @@
 <launch>
-    <arg name="map_size_x" value="42.0"/>
-    <arg name="map_size_y" value="30.0"/>
-    <arg name="map_size_z" value=" 5.0"/>
+    <arg name="map_size_x" value="10.0"/>
+    <arg name="map_size_y" value="70.0"/>
+    <arg name="map_size_z" value=" 10"/>
 
     <arg name="odom_topic" value="visual_slam/odom" />
     <arg name="drone_id" value="1" />
